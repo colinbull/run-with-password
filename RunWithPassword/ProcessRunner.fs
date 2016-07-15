@@ -141,7 +141,7 @@ module ProcessExecutor =
         match Password.get passPhrase path key with
         | Some password ->
             let password = 
-                if password |> Seq.exists (fun c -> c = ',' || c = ';' || c = '-' || c = '/' || c = '=')
+                if password |> Seq.exists (fun c -> c = ',' || c = ';' || c = '-' || c = '/' || c = '=' || c = ' ' || c ='\\')
                 then sprintf "\"%s\"" password
                 else password
             cmd, Regex.Replace(args, replacePattern, password), password
