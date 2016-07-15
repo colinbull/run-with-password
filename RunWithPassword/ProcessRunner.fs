@@ -39,7 +39,7 @@ module Encryption =
         let cipherTextBytesWithSaltAndIv = cipherBytes;
         let saltStringBytes = cipherTextBytesWithSaltAndIv.[0..31] 
         let ivStringBytes = cipherTextBytesWithSaltAndIv.[32..63]
-        let cipherTextBytes = cipherTextBytesWithSaltAndIv.[64..cipherTextBytesWithSaltAndIv.Length - 1]
+        let cipherTextBytes = cipherTextBytesWithSaltAndIv.[64..]
         use password = new Rfc2898DeriveBytes(passPhrase, saltStringBytes, iterations)
         let keyBytes = password.GetBytes(32);
         use symmetricKey = new RijndaelManaged(BlockSize = 256, Mode = CipherMode.CBC, Padding = PaddingMode.PKCS7)
@@ -47,7 +47,8 @@ module Encryption =
         use memoryStream = new MemoryStream(cipherTextBytes)
         use cryptoStream = new CryptoStream(memoryStream, decryptor, CryptoStreamMode.Read)
         let plainTextBytes = Array.zeroCreate<byte> cipherTextBytes.Length
-        let decryptedByteCount = cryptoStream.Read(plainTextBytes, 0, plainTextBytes.Length)
+        let decryptedByteCount =  ref (cryptoStream.Read(plainTextBytes, 0, plainTextBytes.Length))
+
         memoryStream.Close()
         cryptoStream.Close()
         plainTextBytes
@@ -138,14 +139,19 @@ module ProcessExecutor =
         let m = Regex.Match(args, keyPattern)
         let key = m.Groups.[1].Value
         match Password.get passPhrase path key with
-        | Some password -> cmd, Regex.Replace(args, replacePattern, password), password
+        | Some password ->
+            let password = 
+                if password |> Seq.exists (fun c -> c = ',' || c = ';' || c = '-' || c = '/' || c = '=')
+                then sprintf "\"%s\"" password
+                else password
+            cmd, Regex.Replace(args, replacePattern, password), password
         | None -> failwithf "Unable to find password for key %A" key
 
     let execute (cmd:string) (args:string) (password:string) =
         let writeSanitized (ev:DataReceivedEventArgs) = 
             if ev <> null && not(System.String.IsNullOrWhiteSpace(ev.Data))
             then
-                ev.Data.Replace(password, String.replicate password.Length "*") 
+                ev.Data.Replace(password, String.replicate 8 "*") 
                 |> System.Console.WriteLine
         let startInfo = 
             let si = ProcessStartInfo(cmd, args)
@@ -153,13 +159,14 @@ module ProcessExecutor =
             si.RedirectStandardError <- true
             si.RedirectStandardOutput <- true
             si
-        let p = new Process()
+        use p = new Process()
         p.StartInfo <- startInfo
         p.ErrorDataReceived |> Event.add (writeSanitized)
         p.OutputDataReceived |> Event.add (writeSanitized)
         p.Start() |> ignore
         p.BeginErrorReadLine()
         p.BeginOutputReadLine() 
+        
         p.WaitForExit()
         p.ExitCode
 
@@ -204,7 +211,7 @@ type CLIArguments =
             | Passphrase _ -> "The shared secret to use for encryption. If this is not provided you will be prompted" 
 
 let parser = ArgumentParser.Create<CLIArguments>(programName = "rwpass.exe", errorHandler = new ProcessExiter())
-    
+
 [<EntryPoint>]
 let main argv =
     let args = parser.ParseCommandLine(argv)
